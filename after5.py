@@ -4,7 +4,7 @@ import argparse
 import subprocess
 import sys
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import NamedTuple
 
 try:
@@ -89,6 +89,17 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: 
     return shift_map
 
 
+def _print_dry_run(commits: list[CommitTimeInfo], shift_map: ShiftMap) -> None:
+    if not shift_map:
+        print("No commits to shift.")
+        return
+    old_utc = {c.commit_hash: c.utc_seconds for c in commits}
+    for h, new_ts in shift_map.items():
+        old = datetime.fromtimestamp(old_utc[h], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        new = datetime.fromtimestamp(new_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        print(f"{h[:8]}  {old}  →  {new}")
+
+
 def _redate(date_bytes: bytes, new_ts: int) -> bytes:
     _, offset_str = date_bytes.decode().split()
     return f"{new_ts} {offset_str}".encode()
@@ -115,6 +126,8 @@ def main():
     p.add_argument("--name", help="replace author/committer name")
     p.add_argument("--email", help="replace author/committer email")
     p.add_argument("--floor-time", default="17:00", help="earliest allowed commit time (HH:MM, default 17:00)")
+    p.add_argument("--dry-run", action="store_true",
+                   help="print commits that would be shifted without rewriting history")
     p.add_argument("--include-weekends", action="store_true",
                    help="also rewrite weekend commits (default: skip weekends)")
     args = p.parse_args()
@@ -122,6 +135,10 @@ def main():
     floor = _parse_floor_time(args.floor_time)
     commits = _collect_commits(args.repo)
     shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, floor=floor)
+
+    if args.dry_run:
+        _print_dry_run(commits, shift_map)
+        return
 
     fr_args = fr.FilteringOptions.parse_args(["--force", "--repo", args.repo])
     fr.RepoFilter(fr_args, commit_callback=make_callback(shift_map, args.name, args.email)).run()
