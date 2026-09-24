@@ -11,9 +11,9 @@ def _day_offset(day: date) -> int:
     return (day - _EPOCH).days * 86400
 
 
-def make(h, sod, day=WEEKDAY, tz_offset=0):
+def make(h, secs, day=WEEKDAY, tz_offset=0):
     tz = timezone(timedelta(seconds=tz_offset))
-    dt = datetime(day.year, day.month, day.day, tzinfo=tz) + timedelta(seconds=sod)
+    dt = datetime(day.year, day.month, day.day, tzinfo=tz) + timedelta(seconds=secs)
     return CommitTimeInfo(h, dt)
 
 

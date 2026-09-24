@@ -22,7 +22,7 @@ class CommitTimeInfo(NamedTuple):
     dt: datetime  # timezone-aware, commit's local tz
 
 
-def _sod(dt: datetime) -> int:
+def _day_secs(dt: datetime) -> int:
     return dt.hour * 3600 + dt.minute * 60 + dt.second
 
 def _parse_floor_time(s: str) -> int:
@@ -70,21 +70,21 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: 
             continue
 
         day_commits.sort(key=lambda c: c.dt.time())
-        first_sod = _sod(day_commits[0].dt)
-        last_sod = _sod(day_commits[-1].dt)
+        first_secs = _day_secs(day_commits[0].dt)
+        last_secs = _day_secs(day_commits[-1].dt)
 
-        if first_sod >= floor:
+        if first_secs >= floor:
             continue
 
         for commit in day_commits:
-            sod = _sod(commit.dt)
-            if last_sod < floor:
-                new_sod = floor + (sod - first_sod)
+            secs = _day_secs(commit.dt)
+            if last_secs < floor:
+                new_secs = floor + (secs - first_secs)
             else:
-                ratio = (sod - first_sod) / (last_sod - first_sod)
-                new_sod = floor + ratio * (last_sod - floor)
+                ratio = (secs - first_secs) / (last_secs - first_secs)
+                new_secs = floor + ratio * (last_secs - floor)
 
-            shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + (int(new_sod) - sod)
+            shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + (int(new_secs) - secs)
 
     return shift_map
 
