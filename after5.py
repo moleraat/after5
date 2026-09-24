@@ -1,5 +1,23 @@
 #!/usr/bin/env python3
-"""Rewrite git history so all commits land after 5 PM in their local timezone."""
+"""
+😼 Rewrite git history so all commits land outside of 9-5 in local timezone.
+
+Examples:
+    # Preview what would be shifted (run from inside the repo)
+    after5 --dry-run
+
+    # Scope to work-hours commits only, leaving late-night commits alone
+    after5 --ceiling-time 09:00 --dry-run
+
+    # Rewrite only a recent window
+    after5 --since 2024-01-01 --until 2024-06-01
+
+    # Full rewrite: shift timestamps and replace author identity
+    after5 --ceiling-time 09:00 --name "Ada Lovelace" --email ada@example.com
+
+    # Or pass an explicit path from anywhere
+    after5 /path/to/repo --dry-run
+"""
 import argparse
 import subprocess
 import sys
@@ -116,7 +134,7 @@ def make_callback(shift_map: ShiftMap, name: str | None, email: str | None):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("repo", help="path to the git repo to rewrite")
+    p.add_argument("repo", nargs="?", default=".", help="path to the git repo (default: current directory)")
     p.add_argument("--name", help="replace author/committer name")
     p.add_argument("--email", help="replace author/committer email")
     p.add_argument("--floor-time", default="17:00", help="earliest allowed commit time (HH:MM, default 17:00)")
