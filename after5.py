@@ -38,11 +38,13 @@ def _parse_utc_offset(offset_str: str) -> int:
     return sign * (int(offset_str[1:3]) * 3600 + int(offset_str[3:5]) * 60)
 
 
-def _collect_commits(repo_path: str) -> list[CommitTimeInfo]:
-    result = subprocess.run(
-        ["git", "-C", repo_path, "log", "--format=%H %ad", "--date=raw"],
-        capture_output=True, text=True, check=True,
-    )
+def _collect_commits(repo_path: str, since: str | None = None, until: str | None = None) -> list[CommitTimeInfo]:
+    cmd = ["git", "-C", repo_path, "log", "--format=%H %ad", "--date=raw"]
+    if since:
+        cmd.append(f"--since={since}")
+    if until:
+        cmd.append(f"--until={until}")
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     commits = []
     for line in result.stdout.splitlines():
         if not line.strip():
@@ -119,6 +121,8 @@ def main():
     p.add_argument("--email", help="replace author/committer email")
     p.add_argument("--floor-time", default="17:00", help="earliest allowed commit time (HH:MM, default 17:00)")
     p.add_argument("--ceiling-time", default="00:00", help="latest safe time before forbidden zone (HH:MM, default 00:00)")
+    p.add_argument("--since", help="only consider commits after this date (passed to git log, e.g. '2024-01-01')")
+    p.add_argument("--until", help="only consider commits before this date (passed to git log)")
     p.add_argument("--dry-run", action="store_true",
                    help="print commits that would be shifted without rewriting history")
     p.add_argument("--include-weekends", action="store_true",
@@ -127,7 +131,7 @@ def main():
 
     floor = _parse_hhmm(args.floor_time)
     ceiling = _parse_hhmm(args.ceiling_time)
-    commits = _collect_commits(args.repo)
+    commits = _collect_commits(args.repo, since=args.since, until=args.until)
     shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, floor=floor, ceiling=ceiling)
 
     if args.dry_run:
