@@ -25,12 +25,12 @@ class CommitTimeInfo(NamedTuple):
 def _day_secs(dt: datetime) -> int:
     return dt.hour * 3600 + dt.minute * 60 + dt.second
 
-def _parse_floor_time(s: str) -> int:
+def _parse_hhmm(s: str) -> int:
     try:
         h, m = s.split(":")
         return int(h) * 3600 + int(m) * 60
     except (ValueError, AttributeError):
-        raise SystemExit(f"Invalid floor-time '{s}': expected HH:MM")
+        raise SystemExit(f"Invalid time '{s}': expected HH:MM")
 
 
 def _parse_utc_offset(offset_str: str) -> int:
@@ -57,8 +57,8 @@ def _collect_commits(repo_path: str) -> list[CommitTimeInfo]:
     return commits
 
 
-def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: int) -> ShiftMap:
-    """Returns {commit_hash: new_utc_timestamp}."""
+def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: int, ceiling: int = 0) -> ShiftMap:
+    """Returns {commit_hash: new_utc_timestamp}. Shifts commits in [ceiling, floor) to after floor."""
     by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
     for commit in commits:
         by_day[commit.dt.date()].append(commit)
@@ -70,21 +70,13 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: 
             continue
 
         day_commits.sort(key=lambda c: c.dt.time())
-        first_secs = _day_secs(day_commits[0].dt)
-        last_secs = _day_secs(day_commits[-1].dt)
-
-        if first_secs >= floor:
+        forbidden = [c for c in day_commits if ceiling <= _day_secs(c.dt) < floor]
+        if not forbidden:
             continue
 
-        for commit in day_commits:
-            secs = _day_secs(commit.dt)
-            if last_secs < floor:
-                new_secs = floor + (secs - first_secs)
-            else:
-                ratio = (secs - first_secs) / (last_secs - first_secs)
-                new_secs = floor + ratio * (last_secs - floor)
-
-            shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + (int(new_secs) - secs)
+        shift = floor - _day_secs(forbidden[0].dt)
+        for commit in forbidden:
+            shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + shift
 
     return shift_map
 
@@ -126,15 +118,17 @@ def main():
     p.add_argument("--name", help="replace author/committer name")
     p.add_argument("--email", help="replace author/committer email")
     p.add_argument("--floor-time", default="17:00", help="earliest allowed commit time (HH:MM, default 17:00)")
+    p.add_argument("--ceiling-time", default="00:00", help="latest safe time before forbidden zone (HH:MM, default 00:00)")
     p.add_argument("--dry-run", action="store_true",
                    help="print commits that would be shifted without rewriting history")
     p.add_argument("--include-weekends", action="store_true",
                    help="also rewrite weekend commits (default: skip weekends)")
     args = p.parse_args()
 
-    floor = _parse_floor_time(args.floor_time)
+    floor = _parse_hhmm(args.floor_time)
+    ceiling = _parse_hhmm(args.ceiling_time)
     commits = _collect_commits(args.repo)
-    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, floor=floor)
+    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, floor=floor, ceiling=ceiling)
 
     if args.dry_run:
         _print_dry_run(commits, shift_map)

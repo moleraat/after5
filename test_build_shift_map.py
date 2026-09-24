@@ -34,12 +34,35 @@ def test_single_before_floor():
     assert sm["a"] == _day_offset(WEEKDAY) + FLOOR
 
 
-def test_proportional():
-    # first < floor <= last: first → floor, last unchanged
+def test_after_floor_untouched():
+    # commit already past floor is not forbidden, stays out of shift_map
     sm = _build_shift_map([make("a", 15 * 3600), make("b", 20 * 3600)], skip_weekends=True, floor=FLOOR)
-    base = _day_offset(WEEKDAY)
-    assert sm["a"] == base + FLOOR
-    assert sm["b"] == base + 20 * 3600
+    assert sm["a"] == _day_offset(WEEKDAY) + FLOOR
+    assert "b" not in sm
+
+
+def test_ceiling_skips_early_morning():
+    # commit before ceiling is outside the forbidden zone — not shifted
+    CEILING = 9 * 3600
+    sm = _build_shift_map([make("a", 7 * 3600)], skip_weekends=True, floor=FLOOR, ceiling=CEILING)
+    assert sm == {}
+
+
+def test_ceiling_shifts_workday_commit():
+    CEILING = 9 * 3600
+    sm = _build_shift_map([make("a", 10 * 3600)], skip_weekends=True, floor=FLOOR, ceiling=CEILING)
+    assert sm["a"] == _day_offset(WEEKDAY) + FLOOR
+
+
+def test_ceiling_mixed_day():
+    # early-morning commit (before ceiling) + workday commit (in zone): only workday shifts
+    CEILING = 9 * 3600
+    sm = _build_shift_map(
+        [make("early", 7 * 3600), make("work", 11 * 3600)],
+        skip_weekends=True, floor=FLOOR, ceiling=CEILING,
+    )
+    assert "early" not in sm
+    assert sm["work"] == _day_offset(WEEKDAY) + FLOOR
 
 
 def test_weekend_skip():
