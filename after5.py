@@ -10,7 +10,7 @@ Examples:
     after5 --work-start 10:00 --work-end 18:00 --dry-run
 
     # Snipe rewrite a small window (e.g. you were travelling and had a different schedule)
-    after5 --after 2024-01-01 --before 2024-06-01
+    after5 --after 2026-05-01 --before 2026-06-01
 
     # Rewrite name and email info as well (e.g. you have a different git profile)
     after5 --name "sneaky" --email beaky@goodemployee.com
@@ -34,7 +34,7 @@ ShiftMap = dict[CommitHash, UtcTimestamp]
 
 class CommitTimeInfo(NamedTuple):
     commit_hash: CommitHash
-    dt: datetime  # timezone-aware, commit's local tz
+    dt: datetime
 
 
 def _day_secs(dt: datetime) -> int:
@@ -53,7 +53,7 @@ def _parse_utc_offset(offset_str: str) -> int:
     return sign * (int(offset_str[1:3]) * 3600 + int(offset_str[3:5]) * 60)
 
 
-def _collect_commits(repo_path: str, after: str | None = None, before: str | None = None) -> list[CommitTimeInfo]:
+def collect_commits(repo_path: str, after: str | None = None, before: str | None = None) -> list[CommitTimeInfo]:
     cmd = ["git", "-C", repo_path, "log", "--format=%H %ad", "--date=raw"]
     if after:
         cmd.append(f"--since={after}")
@@ -74,7 +74,7 @@ def _collect_commits(repo_path: str, after: str | None = None, before: str | Non
     return commits
 
 
-def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, work_end: int, work_start: int = 9 * 3600) -> ShiftMap:
+def build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, work_end: int, work_start: int = 9 * 3600) -> ShiftMap:
     """Returns {commit_hash: new_utc_timestamp}. Shifts commits in [work_start, work_end) to after work_end."""
     by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
     for commit in commits:
@@ -133,7 +133,19 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
         "repo", nargs="?", default=".",
-        help="path to the git repo (default: current directory)"
+        help="path to target git repo (default current directory)"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="print commits that would be shifted without rewriting history"
+    )
+    p.add_argument(
+        "--work-end", default="17:00",
+        help="defines end of work day — commits in work day get shifted after it (HH:MM, default 17:00)"
+    )
+    p.add_argument(
+        "--work-start", default="09:00",
+        help="defines start of work day — commits before this aren't touched (HH:MM, default 09:00)"
     )
     p.add_argument(
         "--name",
@@ -144,41 +156,29 @@ def main():
         help="replace author/committer email"
     )
     p.add_argument(
-        "--work-end", default="17:00",
-        help="end of work hours — commits before this get shifted to after it (HH:MM, default 17:00)"
-    )
-    p.add_argument(
-        "--work-start", default="09:00",
-        help="start of work hours — commits before this are left alone (HH:MM, default 09:00)"
-    )
-    p.add_argument(
         "--after",
-        help="only consider commits after this date (e.g. '2024-01-01')"
+        help="only target commits after this date (YYYY-MM-DD)"
     )
     p.add_argument(
         "--before",
-        help="only consider commits before this date"
-    )
-    p.add_argument(
-        "--dry-run", action="store_true",
-        help="print commits that would be shifted without rewriting history"
+        help="only target commits before this date (YYYY-MM-DD)"
     )
     p.add_argument(
         "--include-weekends", action="store_true",
-        help="also rewrite weekend commits (default: skip weekends)"
+        help="option to rewrite weekend commits (default ignore weekends)"
     )
     args = p.parse_args()
 
     work_end = _parse_hhmm(args.work_end)
     work_start = _parse_hhmm(args.work_start)
-    commits = _collect_commits(args.repo, after=args.after, before=args.before)
-    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, work_end=work_end, work_start=work_start)
+    commits = collect_commits(args.repo, after=args.after, before=args.before)
+    shift_map = build_shift_map(commits, work_end=work_end, work_start=work_start, skip_weekends=not args.include_weekends)
 
     if args.dry_run:
         _print_dry_run(commits, shift_map)
         return
 
-    fr_args = fr.FilteringOptions.parse_args(["--force", "--repo", args.repo])
+    fr_args = fr.FilteringOptions.parse_args(["--repo", args.repo])
     fr.RepoFilter(fr_args, commit_callback=make_callback(shift_map, args.name, args.email)).run()
 
 
