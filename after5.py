@@ -12,7 +12,6 @@ try:
 except ImportError:
     sys.exit("git-filter-repo not found: something is terribly wrong")
 
-FLOOR = 17 * 3600  # 5 PM in seconds # todo, use paslirsed / default
 
 CommitHash = str
 UtcTimestamp = int
@@ -23,6 +22,14 @@ class CommitTimeInfo(NamedTuple):
     day_local: date
     seconds_after_midnight_local: int
     utc_seconds: UtcTimestamp
+
+def _parse_floor_time(s: str) -> int:
+    try:
+        h, m = s.split(":")
+        return int(h) * 3600 + int(m) * 60
+    except (ValueError, AttributeError):
+        raise SystemExit(f"Invalid floor-time '{s}': expected HH:MM")
+
 
 def _parse_utc_offset(offset_str: str) -> int:
     sign = 1 if offset_str[0] == "+" else -1
@@ -50,11 +57,7 @@ def _collect_commits(repo_path: str) -> list[CommitTimeInfo]:
     return commits
 
 
-def _is_weekend(d: date) -> bool:
-    return d.weekday() >= 5
-
-
-def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool) -> ShiftMap:
+def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: int) -> ShiftMap:
     """Returns {commit_hash: new_utc_timestamp}."""
     by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
     for commit in commits:
@@ -63,23 +66,23 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool) -> Shif
     shift_map: ShiftMap = {}
 
     for local_day, day_commits in by_day.items():
-        if skip_weekends and _is_weekend(local_day):
+        if skip_weekends and local_day.weekday() >= 5:
             continue
 
         day_commits.sort(key=lambda c: c.seconds_after_midnight_local)
         first_sod = day_commits[0].seconds_after_midnight_local
         last_sod = day_commits[-1].seconds_after_midnight_local
 
-        if first_sod >= FLOOR:
+        if first_sod >= floor:
             continue
 
         for commit in day_commits:
             sod = commit.seconds_after_midnight_local
-            if last_sod < FLOOR:
-                new_sod = FLOOR + (sod - first_sod)
+            if last_sod < floor:
+                new_sod = floor + (sod - first_sod)
             else:
                 ratio = (sod - first_sod) / (last_sod - first_sod)
-                new_sod = FLOOR + ratio * (last_sod - FLOOR)
+                new_sod = floor + ratio * (last_sod - floor)
 
             shift_map[commit.commit_hash] = commit.utc_seconds + (int(new_sod) - sod)
 
@@ -111,13 +114,14 @@ def main():
     p.add_argument("repo", help="path to the git repo to rewrite")
     p.add_argument("--name", help="replace author/committer name")
     p.add_argument("--email", help="replace author/committer email")
-    p.add_argument("--floor-time", help="set time that all comitts should appear after (default 5pm")
+    p.add_argument("--floor-time", default="17:00", help="earliest allowed commit time (HH:MM, default 17:00)")
     p.add_argument("--include-weekends", action="store_true",
                    help="also rewrite weekend commits (default: skip weekends)")
     args = p.parse_args()
 
+    floor = _parse_floor_time(args.floor_time)
     commits = _collect_commits(args.repo)
-    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends)
+    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, floor=floor)
 
     fr_args = fr.FilteringOptions.parse_args(["--force", "--repo", args.repo])
     fr.RepoFilter(fr_args, commit_callback=make_callback(shift_map, args.name, args.email)).run()
