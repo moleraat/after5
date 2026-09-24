@@ -7,13 +7,13 @@ Examples:
     after5 --dry-run
 
     # Scope to work-hours commits only, leaving late-night commits alone
-    after5 --ceiling-time 09:00 --dry-run
+    after5 --work-start 09:00 --dry-run
 
     # Rewrite only a recent window
     after5 --since 2024-01-01 --until 2024-06-01
 
     # Full rewrite: shift timestamps and replace author identity
-    after5 --ceiling-time 09:00 --name "Ada Lovelace" --email ada@example.com
+    after5 --work-start 09:00 --name "Ada Lovelace" --email ada@example.com
 
     # Or pass an explicit path from anywhere
     after5 /path/to/repo --dry-run
@@ -77,8 +77,8 @@ def _collect_commits(repo_path: str, since: str | None = None, until: str | None
     return commits
 
 
-def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: int, ceiling: int = 0) -> ShiftMap:
-    """Returns {commit_hash: new_utc_timestamp}. Shifts commits in [ceiling, floor) to after floor."""
+def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, work_end: int, work_start: int = 0) -> ShiftMap:
+    """Returns {commit_hash: new_utc_timestamp}. Shifts commits in [work_start, work_end) to after work_end."""
     by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
     for commit in commits:
         by_day[commit.dt.date()].append(commit)
@@ -90,11 +90,11 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: 
             continue
 
         day_commits.sort(key=lambda c: c.dt.time())
-        forbidden = [c for c in day_commits if ceiling <= _day_secs(c.dt) < floor]
+        forbidden = [c for c in day_commits if work_start <= _day_secs(c.dt) < work_end]
         if not forbidden:
             continue
 
-        shift = floor - _day_secs(forbidden[0].dt)
+        shift = work_end - _day_secs(forbidden[0].dt)
         for commit in forbidden:
             shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + shift
 
@@ -137,8 +137,8 @@ def main():
     p.add_argument("repo", nargs="?", default=".", help="path to the git repo (default: current directory)")
     p.add_argument("--name", help="replace author/committer name")
     p.add_argument("--email", help="replace author/committer email")
-    p.add_argument("--floor-time", default="17:00", help="earliest allowed commit time (HH:MM, default 17:00)")
-    p.add_argument("--ceiling-time", default="00:00", help="latest safe time before forbidden zone (HH:MM, default 00:00)")
+    p.add_argument("--work-end", default="17:00", help="end of work hours — commits before this get shifted to after it (HH:MM, default 17:00)")
+    p.add_argument("--work-start", default="00:00", help="start of work hours — commits before this are left alone (HH:MM, default 00:00)")
     p.add_argument("--since", help="only consider commits after this date (passed to git log, e.g. '2024-01-01')")
     p.add_argument("--until", help="only consider commits before this date (passed to git log)")
     p.add_argument("--dry-run", action="store_true",
@@ -147,10 +147,10 @@ def main():
                    help="also rewrite weekend commits (default: skip weekends)")
     args = p.parse_args()
 
-    floor = _parse_hhmm(args.floor_time)
-    ceiling = _parse_hhmm(args.ceiling_time)
+    work_end = _parse_hhmm(args.work_end)
+    work_start = _parse_hhmm(args.work_start)
     commits = _collect_commits(args.repo, since=args.since, until=args.until)
-    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, floor=floor, ceiling=ceiling)
+    shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, work_end=work_end, work_start=work_start)
 
     if args.dry_run:
         _print_dry_run(commits, shift_map)
