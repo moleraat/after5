@@ -19,9 +19,11 @@ ShiftMap = dict[CommitHash, UtcTimestamp]
 
 class CommitTimeInfo(NamedTuple):
     commit_hash: CommitHash
-    day_local: date
-    seconds_after_midnight_local: int
-    utc_seconds: UtcTimestamp
+    dt: datetime  # timezone-aware, commit's local tz
+
+
+def _sod(dt: datetime) -> int:
+    return dt.hour * 3600 + dt.minute * 60 + dt.second
 
 def _parse_floor_time(s: str) -> int:
     try:
@@ -47,12 +49,10 @@ def _collect_commits(repo_path: str) -> list[CommitTimeInfo]:
             continue
         commit_hash, ts_str, offset_str = line.split()
         ts = int(ts_str)
-        local_ts = ts + _parse_utc_offset(offset_str)
+        tz = timezone(timedelta(seconds=_parse_utc_offset(offset_str)))
         commits.append(CommitTimeInfo(
             commit_hash=commit_hash,
-            day_local=date(1970, 1, 1) + timedelta(days=local_ts // 86400),
-            seconds_after_midnight_local=local_ts % 86400,
-            utc_seconds=ts,
+            dt=datetime.fromtimestamp(ts, tz=tz),
         ))
     return commits
 
@@ -61,7 +61,7 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: 
     """Returns {commit_hash: new_utc_timestamp}."""
     by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
     for commit in commits:
-        by_day[commit.day_local].append(commit)
+        by_day[commit.dt.date()].append(commit)
 
     shift_map: ShiftMap = {}
 
@@ -69,22 +69,22 @@ def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, floor: 
         if skip_weekends and local_day.weekday() >= 5:
             continue
 
-        day_commits.sort(key=lambda c: c.seconds_after_midnight_local)
-        first_sod = day_commits[0].seconds_after_midnight_local
-        last_sod = day_commits[-1].seconds_after_midnight_local
+        day_commits.sort(key=lambda c: c.dt.time())
+        first_sod = _sod(day_commits[0].dt)
+        last_sod = _sod(day_commits[-1].dt)
 
         if first_sod >= floor:
             continue
 
         for commit in day_commits:
-            sod = commit.seconds_after_midnight_local
+            sod = _sod(commit.dt)
             if last_sod < floor:
                 new_sod = floor + (sod - first_sod)
             else:
                 ratio = (sod - first_sod) / (last_sod - first_sod)
                 new_sod = floor + ratio * (last_sod - floor)
 
-            shift_map[commit.commit_hash] = commit.utc_seconds + (int(new_sod) - sod)
+            shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + (int(new_sod) - sod)
 
     return shift_map
 
@@ -93,7 +93,7 @@ def _print_dry_run(commits: list[CommitTimeInfo], shift_map: ShiftMap) -> None:
     if not shift_map:
         print("No commits to shift.")
         return
-    old_utc = {c.commit_hash: c.utc_seconds for c in commits}
+    old_utc = {c.commit_hash: int(c.dt.timestamp()) for c in commits}
     for h, new_ts in shift_map.items():
         old = datetime.fromtimestamp(old_utc[h], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         new = datetime.fromtimestamp(new_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
