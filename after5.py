@@ -74,7 +74,7 @@ def _collect_commits(repo_path: str, after: str | None = None, before: str | Non
     return commits
 
 
-def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, work_end: int, work_start: int = 0) -> ShiftMap:
+def _build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, work_end: int, work_start: int = 9 * 3600) -> ShiftMap:
     """Returns {commit_hash: new_utc_timestamp}. Shifts commits in [work_start, work_end) to after work_end."""
     by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
     for commit in commits:
@@ -148,8 +148,8 @@ def main():
         help="end of work hours — commits before this get shifted to after it (HH:MM, default 17:00)"
     )
     p.add_argument(
-        "--work-start", default="00:00",
-        help="start of work hours — commits before this are left alone (HH:MM, default 00:00)"
+        "--work-start", default="09:00",
+        help="start of work hours — commits before this are left alone (HH:MM, default 09:00)"
     )
     p.add_argument(
         "--after",
