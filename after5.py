@@ -1,22 +1,19 @@
 #!/usr/bin/env python3
 """
-😼 Rewrite git history so all commits land outside of 9-5 in local timezone.
+😼 Rewrite git history so all commits land outside 9-5 in local timezone.
 
 Examples:
-    # Preview what would be shifted (run from inside the repo)
+    # Preview what would be shifted
     after5 --dry-run
 
-    # Scope to work-hours commits only, leaving late-night commits alone
-    after5 --work-start 09:00 --dry-run
+    # Override default no-no zone
+    after5 --work-start 10:00 --work-end 18:00 --dry-run
 
-    # Rewrite only a recent window
-    after5 --since 2024-01-01 --until 2024-06-01
+    # Snipe rewrite a small window (e.g. you were travelling and had a different schedule)
+    after5 --after 2024-01-01 --before 2024-06-01
 
-    # Full rewrite: shift timestamps and replace author identity
-    after5 --work-start 09:00 --name "Ada Lovelace" --email ada@example.com
-
-    # Or pass an explicit path from anywhere
-    after5 /path/to/repo --dry-run
+    # Rewrite name and email info as well (e.g. you have a different git profile)
+    after5 --name "sneaky" --email beaky@goodemployee.com
 """
 import argparse
 import subprocess
@@ -56,12 +53,12 @@ def _parse_utc_offset(offset_str: str) -> int:
     return sign * (int(offset_str[1:3]) * 3600 + int(offset_str[3:5]) * 60)
 
 
-def _collect_commits(repo_path: str, since: str | None = None, until: str | None = None) -> list[CommitTimeInfo]:
+def _collect_commits(repo_path: str, after: str | None = None, before: str | None = None) -> list[CommitTimeInfo]:
     cmd = ["git", "-C", repo_path, "log", "--format=%H %ad", "--date=raw"]
-    if since:
-        cmd.append(f"--since={since}")
-    if until:
-        cmd.append(f"--until={until}")
+    if after:
+        cmd.append(f"--since={after}")
+    if before:
+        cmd.append(f"--until={before}")
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     commits = []
     for line in result.stdout.splitlines():
@@ -134,22 +131,47 @@ def make_callback(shift_map: ShiftMap, name: str | None, email: str | None):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("repo", nargs="?", default=".", help="path to the git repo (default: current directory)")
-    p.add_argument("--name", help="replace author/committer name")
-    p.add_argument("--email", help="replace author/committer email")
-    p.add_argument("--work-end", default="17:00", help="end of work hours — commits before this get shifted to after it (HH:MM, default 17:00)")
-    p.add_argument("--work-start", default="00:00", help="start of work hours — commits before this are left alone (HH:MM, default 00:00)")
-    p.add_argument("--since", help="only consider commits after this date (passed to git log, e.g. '2024-01-01')")
-    p.add_argument("--until", help="only consider commits before this date (passed to git log)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="print commits that would be shifted without rewriting history")
-    p.add_argument("--include-weekends", action="store_true",
-                   help="also rewrite weekend commits (default: skip weekends)")
+    p.add_argument(
+        "repo", nargs="?", default=".",
+        help="path to the git repo (default: current directory)"
+    )
+    p.add_argument(
+        "--name",
+        help="replace author/committer name"
+    )
+    p.add_argument(
+        "--email",
+        help="replace author/committer email"
+    )
+    p.add_argument(
+        "--work-end", default="17:00",
+        help="end of work hours — commits before this get shifted to after it (HH:MM, default 17:00)"
+    )
+    p.add_argument(
+        "--work-start", default="00:00",
+        help="start of work hours — commits before this are left alone (HH:MM, default 00:00)"
+    )
+    p.add_argument(
+        "--after",
+        help="only consider commits after this date (e.g. '2024-01-01')"
+    )
+    p.add_argument(
+        "--before",
+        help="only consider commits before this date"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="print commits that would be shifted without rewriting history"
+    )
+    p.add_argument(
+        "--include-weekends", action="store_true",
+        help="also rewrite weekend commits (default: skip weekends)"
+    )
     args = p.parse_args()
 
     work_end = _parse_hhmm(args.work_end)
     work_start = _parse_hhmm(args.work_start)
-    commits = _collect_commits(args.repo, since=args.since, until=args.until)
+    commits = _collect_commits(args.repo, after=args.after, before=args.before)
     shift_map = _build_shift_map(commits, skip_weekends=not args.include_weekends, work_end=work_end, work_start=work_start)
 
     if args.dry_run:
