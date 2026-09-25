@@ -6,6 +6,9 @@
 """
 😼 Rewrite git history so commits land outside 9-5 workday in local timezone.
 Examples:
+    # Rewrite history (git-filter-repo recommends always running on a fresh clone)
+    after5
+
     # Preview what would be shifted
     after5 --dry-run
 
