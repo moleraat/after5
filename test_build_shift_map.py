@@ -104,6 +104,20 @@ def test_narrow_evening_window():
     assert shifted == sorted(shifted), "order not preserved in narrow window"
 
 
+def test_only_before_work_start_untouched():
+    # Day with commits entirely before work_start — nothing in the work window, skip the day.
+    commits = {"a": make(1 * 3600), "b": make(7 * 3600)}
+    sm = build_shift_map(commits, work_start=9 * 3600, work_end=17 * 3600, skip_weekends=True)
+    assert sm == {}
+
+
+def test_only_after_work_end_untouched():
+    # Day with commits entirely after work_end — already safe, nothing to redistribute.
+    commits = {"a": make(18 * 3600), "b": make(21 * 3600 + 2700)}  # 6 PM, 9:45 PM
+    sm = build_shift_map(commits, work_start=9 * 3600, work_end=17 * 3600, skip_weekends=True)
+    assert sm == {}
+
+
 def test_two_weekdays_no_spillover():
     # Two full weekdays (Mon + Tue), 24 commits each.
     # Invariants:

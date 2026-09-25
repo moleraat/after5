@@ -5,7 +5,6 @@
 # ///
 """
 😼 Rewrite git history so commits land outside 9-5 workday in local timezone.
-
 Examples:
     # Preview what would be shifted
     after5 --dry-run
@@ -80,19 +79,23 @@ def build_shift_map(
     day_end: int = 24 * 3600,
     skip_weekends: bool = True
 ) -> ShiftMap:
+    # only redistribute days with >= 1 commit in work window
+    targeted_days = set()
+    for dt in commits.values():
+        if (work_start <= _day_secs(dt) <= work_end) and not (skip_weekends and dt.weekday() >= 5):
+            targeted_days.add(dt.date())
+
     # project [work_start, day_end) → (work_end, day_end)
     target_start = work_end + 1
     scale = (day_end - target_start) / (day_end - work_start)
 
     shift_map: ShiftMap = {}
     for hash, dt in commits.items():
+        if dt.date() not in targeted_days:
+            continue
         day_secs = _day_secs(dt)
-
         if day_secs < work_start or day_secs >= day_end:
             continue
-        if skip_weekends and dt.weekday() >= 5:
-            continue
-
         midnight = int(dt.timestamp()) - day_secs
         shift_map[hash] = midnight + target_start + int((day_secs - work_start) * scale)
 
@@ -107,14 +110,14 @@ def _print_dry_run(commits: dict[CommitHash, datetime], shift_map: ShiftMap) -> 
     prev_day = None
     for hash, new_ts in sorted(shift_map.items(), key=lambda kv: commits[kv[0]]):
         dt = commits[hash]
-        
+
         if dt.date() != prev_day:
             if prev_day is not None:
                 print()
-                
+
             print(dt.strftime("%a %b %-d, %Y"))
             prev_day = dt.date()
-            
+
         old = dt.strftime("%-I:%M %p %z")
         new = datetime.fromtimestamp(new_ts, tz=dt.tzinfo).strftime("%-I:%M %p")
         print(f"  {hash[:8]}  {old}  →  {new}")
