@@ -38,12 +38,12 @@ def test_hourly_redistribution():
     for h in range(9):
         assert str(h) not in sm, f"commit at {h}:00 should be untouched"
 
-    # source span anchored at day_end (exclusive), not last commit:
-    #   [work_start, day_end) = 15h; target [work_end, day_end) = 7h; scale = 7/15
+    # source: [work_start, day_end) = 15h; target: (work_end, day_end) 
+    target_start = WORK_END + 1
     source_span = DAY_END - WORK_START
-    target_span = DAY_END - WORK_END
+    target_span = DAY_END - target_start
     for h in range(9, 24):
-        expected = base + WORK_END + int((h * 3600 - WORK_START) * target_span / source_span)
+        expected = base + target_start + int((h * 3600 - WORK_START) * target_span / source_span)
         assert sm[str(h)] == expected, f"commit at {h}:00: expected {expected}, got {sm.get(str(h))}"
 
 
@@ -82,7 +82,7 @@ def test_work_start_midnight():
     base = _day_offset(WEEKDAY)
     for key, ts in sm.items():
         sod = ts - base
-        assert WORK_END <= sod < DAY_END, f"commit {key} landed outside [work_end, day_end): sod={sod}"
+        assert WORK_END < sod < DAY_END, f"commit {key} landed outside (work_end, day_end): sod={sod}"
 
 
 def test_narrow_evening_window():
@@ -97,7 +97,7 @@ def test_narrow_evening_window():
     base = _day_offset(WEEKDAY)
     for key, ts in sm.items():
         sod = ts - base
-        assert WORK_END <= sod < DAY_END, f"commit {key} outside [22:00, 23:00): sod={sod}"
+        assert WORK_END < sod < DAY_END, f"commit {key} outside (22:00, 23:00): sod={sod}"
 
     shifted = [sm[str(h)] for h in range(9, 23)]
     assert shifted == sorted(shifted), "order not preserved in narrow window"

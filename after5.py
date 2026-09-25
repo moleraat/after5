@@ -18,7 +18,7 @@ Examples:
 import argparse
 import subprocess
 import sys
-from collections import defaultdict
+
 from datetime import date, datetime, timedelta, timezone
 
 try:
@@ -77,26 +77,21 @@ def build_shift_map(
     day_end: int = 24 * 3600,
     skip_weekends: bool = True
 ) -> ShiftMap:
-    by_day: dict[date, list[tuple[CommitHash, datetime]]] = defaultdict(list)
-    for hash, dt in commits.items():
-        by_day[dt.date()].append((hash, dt))
+    # project [work_start, day_end) → (work_end, day_end)
+    target_start = work_end + 1
+    scale = (day_end - target_start) / (day_end - work_start)
 
-    # mark commits in [work_start, work_end] to be moved after work_end,
-    # ignore commits before work_start and on weekends (unless overriden)
     shift_map: ShiftMap = {}
-    for day, day_commits in by_day.items():
-        if skip_weekends and day.weekday() >= 5:
+    for hash, dt in commits.items():
+        day_secs = _day_secs(dt)
+
+        if day_secs < work_start or day_secs >= day_end:
+            continue
+        if skip_weekends and dt.weekday() >= 5:
             continue
 
-        day_commits.sort(key=lambda c: c[1].time())
-        marked_to_shift = [(h, dt) for h, dt in day_commits if work_start <= _day_secs(dt) <= work_end]
-        if not marked_to_shift:
-            continue
-
-        # todo! revisit, may be undesired logic
-        shift = work_end - _day_secs(marked_to_shift[0][1])
-        for h, dt in marked_to_shift:
-            shift_map[h] = int(dt.timestamp()) + shift
+        midnight = int(dt.timestamp()) - day_secs
+        shift_map[hash] = midnight + target_start + int((day_secs - work_start) * scale)
 
     return shift_map
 
