@@ -209,7 +209,7 @@ def main():
         _print_dry_run(commits, shift_map)
         return
 
-    fr_args = fr.FilteringOptions.parse_args(["--repo", args.repo])
+    fr_args = fr.FilteringOptions.parse_args(["--force", "--repo", args.repo])
     fr.RepoFilter(fr_args, commit_callback=make_callback(shift_map, args.name, args.email)).run()
 
 
