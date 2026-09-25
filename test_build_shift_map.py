@@ -38,7 +38,7 @@ def test_hourly_redistribution():
     for h in range(9):
         assert str(h) not in sm, f"commit at {h}:00 should be untouched"
 
-    # source: [work_start, day_end) = 15h; target: (work_end, day_end) 
+    # source: [work_start, day_end) = 15h; target: (work_end, day_end)
     target_start = WORK_END + 1
     source_span = DAY_END - WORK_START
     target_span = DAY_END - target_start
