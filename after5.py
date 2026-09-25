@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-😼 Rewrite git history so all commits land outside 9-5 in local timezone.
+😼 Rewrite git history so commits land outside 9-5 workday in local timezone.
 
 Examples:
     # Preview what would be shifted
@@ -12,7 +12,7 @@ Examples:
     # Snipe rewrite a small window (e.g. you were travelling and had a different schedule)
     after5 --after 2026-05-01 --before 2026-06-01
 
-    # Rewrite name and email info as well (e.g. you have a different git profile)
+    # Option to independently rewrite name and email info (e.g. you have a different git profile)
     after5 --name "sneaky" --email beaky@goodemployee.com
 """
 import argparse
@@ -20,7 +20,6 @@ import subprocess
 import sys
 from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import NamedTuple
 
 try:
     import git_filter_repo as fr
@@ -31,10 +30,6 @@ except ImportError:
 CommitHash = str
 UtcTimestamp = int
 ShiftMap = dict[CommitHash, UtcTimestamp]
-
-class CommitTimeInfo(NamedTuple):
-    commit_hash: CommitHash
-    dt: datetime
 
 
 def _day_secs(dt: datetime) -> int:
@@ -53,64 +48,73 @@ def _parse_utc_offset(offset_str: str) -> int:
     return sign * (int(offset_str[1:3]) * 3600 + int(offset_str[3:5]) * 60)
 
 
-def collect_commits(repo_path: str, after: str | None = None, before: str | None = None) -> list[CommitTimeInfo]:
+def collect_commits(repo_path: str, after: str | None = None, before: str | None = None) -> dict[CommitHash, datetime]:
     cmd = ["git", "-C", repo_path, "log", "--format=%H %ad", "--date=raw"]
     if after:
         cmd.append(f"--since={after}")
     if before:
         cmd.append(f"--until={before}")
+
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    commits = []
+
+    commits = {}
     for line in result.stdout.splitlines():
         if not line.strip():
             continue
+
         commit_hash, ts_str, offset_str = line.split()
         ts = int(ts_str)
         tz = timezone(timedelta(seconds=_parse_utc_offset(offset_str)))
-        commits.append(CommitTimeInfo(
-            commit_hash=commit_hash,
-            dt=datetime.fromtimestamp(ts, tz=tz),
-        ))
+        commits[commit_hash] = datetime.fromtimestamp(ts, tz=tz)
+
     return commits
 
 
-def build_shift_map(commits: list[CommitTimeInfo], skip_weekends: bool, work_end: int, work_start: int = 9 * 3600) -> ShiftMap:
-    """Returns {commit_hash: new_utc_timestamp}. Shifts commits in [work_start, work_end) to after work_end."""
-    by_day: dict[date, list[CommitTimeInfo]] = defaultdict(list)
-    for commit in commits:
-        by_day[commit.dt.date()].append(commit)
+def build_shift_map(
+    commits: dict[CommitHash, datetime],
+    work_end: int = 17 * 3600,
+    work_start: int = 9 * 3600,
+    skip_weekends: bool = True
+) -> ShiftMap:
+    by_day: dict[date, list[tuple[CommitHash, datetime]]] = defaultdict(list)
+    for hash, dt in commits.items():
+        by_day[dt.date()].append((hash, dt))
 
+    # mark commits in [work_start, work_end] to be moved after work_end,
+    # ignore commits before work_start and on weekends (unless overriden)
     shift_map: ShiftMap = {}
-
-    for local_day, day_commits in by_day.items():
-        if skip_weekends and local_day.weekday() >= 5:
+    for day, day_commits in by_day.items():
+        if skip_weekends and day.weekday() >= 5:
             continue
 
-        day_commits.sort(key=lambda c: c.dt.time())
-        forbidden = [c for c in day_commits if work_start <= _day_secs(c.dt) < work_end]
-        if not forbidden:
+        day_commits.sort(key=lambda c: c[1].time())
+        marked_to_shift = [(h, dt) for h, dt in day_commits if work_start <= _day_secs(dt) <= work_end]
+        if not marked_to_shift:
             continue
 
-        shift = work_end - _day_secs(forbidden[0].dt)
-        for commit in forbidden:
-            shift_map[commit.commit_hash] = int(commit.dt.timestamp()) + shift
+        # todo! revisit, may be undesired logic
+        shift = work_end - _day_secs(marked_to_shift[0][1])
+        for h, dt in marked_to_shift:
+            shift_map[h] = int(dt.timestamp()) + shift
 
     return shift_map
 
 
-def _print_dry_run(commits: list[CommitTimeInfo], shift_map: ShiftMap) -> None:
+def _print_dry_run(commits: dict[CommitHash, datetime], shift_map: ShiftMap) -> None:
     if not shift_map:
-        print("No commits to shift.")
+        print("... no history? 🤨")
         return
-    old_utc = {c.commit_hash: int(c.dt.timestamp()) for c in commits}
-    for h, new_ts in shift_map.items():
-        old = datetime.fromtimestamp(old_utc[h], tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        new = datetime.fromtimestamp(new_ts, tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-        print(f"{h[:8]}  {old}  →  {new}")
+
+    for hash, new_ts in shift_map.items():
+        old_dt = commits[hash]
+        old = old_dt.strftime("%Y-%m-%d %H:%M %z")
+        new = datetime.fromtimestamp(new_ts, tz=old_dt.tzinfo).strftime("%Y-%m-%d %H:%M %z")
+        print(f"{hash[:8]}  {old}  →  {new}")
 
 
-def _redate(date_bytes: bytes, new_ts: int) -> bytes:
-    _, offset_str = date_bytes.decode().split()
+def _replace_timestamp(date: bytes, new_ts: int) -> bytes:
+    # keep tz offset, replace utc seconds
+    _, offset_str = date.decode().split()
     return f"{new_ts} {offset_str}".encode()
 
 
@@ -119,8 +123,9 @@ def make_callback(shift_map: ShiftMap, name: str | None, email: str | None):
         commit_hash = commit.original_id.decode()
         if commit_hash in shift_map:
             new_ts = shift_map[commit_hash]
-            commit.author_date = _redate(commit.author_date, new_ts)
-            commit.committer_date = _redate(commit.committer_date, new_ts)
+            commit.author_date = _replace_timestamp(commit.author_date, new_ts)
+            commit.committer_date = _replace_timestamp(commit.committer_date, new_ts)
+
         if name:
             commit.author_name = commit.committer_name = name.encode()
         if email:
@@ -171,8 +176,14 @@ def main():
 
     work_end = _parse_hhmm(args.work_end)
     work_start = _parse_hhmm(args.work_start)
+
     commits = collect_commits(args.repo, after=args.after, before=args.before)
-    shift_map = build_shift_map(commits, work_end=work_end, work_start=work_start, skip_weekends=not args.include_weekends)
+    shift_map = build_shift_map(
+        commits,
+        work_end=work_end,
+        work_start=work_start,
+        skip_weekends=not args.include_weekends
+    )
 
     if args.dry_run:
         _print_dry_run(commits, shift_map)
