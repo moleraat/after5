@@ -104,11 +104,20 @@ def _print_dry_run(commits: dict[CommitHash, datetime], shift_map: ShiftMap) -> 
         print("... no history? 🤨")
         return
 
-    for hash, new_ts in shift_map.items():
-        old_dt = commits[hash]
-        old = old_dt.strftime("%Y-%m-%d %H:%M %z")
-        new = datetime.fromtimestamp(new_ts, tz=old_dt.tzinfo).strftime("%Y-%m-%d %H:%M %z")
-        print(f"{hash[:8]}  {old}  →  {new}")
+    prev_day = None
+    for hash, new_ts in sorted(shift_map.items(), key=lambda kv: commits[kv[0]]):
+        dt = commits[hash]
+        
+        if dt.date() != prev_day:
+            if prev_day is not None:
+                print()
+                
+            print(dt.strftime("%a %b %-d, %Y"))
+            prev_day = dt.date()
+            
+        old = dt.strftime("%-I:%M %p %z")
+        new = datetime.fromtimestamp(new_ts, tz=dt.tzinfo).strftime("%-I:%M %p")
+        print(f"  {hash[:8]}  {old}  →  {new}")
 
 
 def _replace_timestamp(date: bytes, new_ts: int) -> bytes:
