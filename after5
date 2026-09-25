@@ -19,7 +19,7 @@ Examples:
     after5 --after 2026-05-01 --before 2026-06-01
 
     # Option to independently rewrite name and email info (e.g. you have a different git profile)
-    after5 --name "sneaky" --email beaky@goodemployee.com
+    after5 --name sneaky --email beaky@goodemployee.com
 """
 import argparse
 import subprocess
