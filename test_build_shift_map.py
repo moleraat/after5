@@ -1,4 +1,5 @@
 from datetime import date, datetime, timedelta, timezone
+
 from after5 import build_shift_map
 
 WORK_END = 17 * 3600  # 61200
