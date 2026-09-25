@@ -74,6 +74,7 @@ def build_shift_map(
     commits: dict[CommitHash, datetime],
     work_end: int = 17 * 3600,
     work_start: int = 9 * 3600,
+    day_end: int = 24 * 3600,
     skip_weekends: bool = True
 ) -> ShiftMap:
     by_day: dict[date, list[tuple[CommitHash, datetime]]] = defaultdict(list)
@@ -169,6 +170,10 @@ def main():
         help="only target commits before this date (YYYY-MM-DD)"
     )
     p.add_argument(
+        "--day-end", default="24:00",
+        help="exclusive end of day for timestamp redistribution (HH:MM, default 24:00, same as 00:00 next day)"
+    )
+    p.add_argument(
         "--include-weekends", action="store_true",
         help="option to rewrite weekend commits (default ignore weekends)"
     )
@@ -176,12 +181,14 @@ def main():
 
     work_end = _parse_hhmm(args.work_end)
     work_start = _parse_hhmm(args.work_start)
+    day_end = _parse_hhmm(args.day_end)
 
     commits = collect_commits(args.repo, after=args.after, before=args.before)
     shift_map = build_shift_map(
         commits,
         work_end=work_end,
         work_start=work_start,
+        day_end=day_end,
         skip_weekends=not args.include_weekends
     )
 
