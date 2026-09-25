@@ -118,9 +118,12 @@ def _print_dry_run(commits: dict[CommitHash, datetime], shift_map: ShiftMap) -> 
             print(dt.strftime("%a %b %-d, %Y"))
             prev_day = dt.date()
 
-        old = dt.strftime("%-I:%M %p %z")
+        offset_h = int((dt.utcoffset() or timedelta()).total_seconds() / 3600)
+        tz_label = f"UTC{'+' if offset_h >= 0 else ''}{offset_h}"
+
+        old = dt.strftime("%-I:%M %p")
         new = datetime.fromtimestamp(new_ts, tz=dt.tzinfo).strftime("%-I:%M %p")
-        print(f"  {hash[:8]}  {old}  →  {new}")
+        print(f"  {hash[:8]}  {old} ({tz_label})  →  {new} ({tz_label})")
 
 
 def _replace_timestamp(date: bytes, new_ts: int) -> bytes:
@@ -173,11 +176,11 @@ def main():
     )
     p.add_argument(
         "--after",
-        help="only target commits after this date (YYYY-MM-DD)"
+        help="only target commits after this date, exclusive (YYYY-MM-DD)"
     )
     p.add_argument(
         "--before",
-        help="only target commits before this date (YYYY-MM-DD)"
+        help="only target commits before this date, inclusive (YYYY-MM-DD)"
     )
     p.add_argument(
         "--day-end", default="24:00",
