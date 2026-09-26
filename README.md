@@ -1,8 +1,8 @@
 # 😼 after5
 
-If you're like me, there's nothing better than stealing company time. Easily rewrite commit history to be after 5pm. 
+If you're like me, there's nothing better than stealing company time. Easily rewrite commit history to be after 5pm, and under a different name / email if you want. 
 
-Also installs a post-commit hook to rewrite your info going forward without having to remember to run `after5`. Remembers your settings for author and email info, different working hours other than 9-5pm, etc.
+Also installs a post-commit hook to rewrite your info going forward without having to remember to run `after5`. Remembers the settings you ran it with the first time.
 
 Builds on top of [git-filter-repo](https://github.com/newren/git-filter-repo#simple-example-with-comparisons)
 
@@ -48,4 +48,6 @@ git push --force
 
 Running `after5` in the target repo goes through the commit history day by day. It collects commits in the interval `[work_start, day_end)` and maps them to the interval `(work_end, day_end)`. Anything before `work_start` is ignored. 
 
-After running the backfill with `after5`, a post-commit hook is installed in the target repo. Going forward, commits are automatically rewritten with the settings you originally ran the backfill with (e.g. work hours, author name, etc).
+After running the backfill with `after5`, a post-commit hook is installed in the target repo. Going forward, commits are automatically rewritten with the settings you originally ran the backfill with (e.g. work hours, author name, etc). 
+
+Note: Git handles hooks in a weird way. If you have global commit hooks configured in `~/.git-hooks/`, the default behavior is to skip locally configured commits in `~/repo/path/.git/hooks/`. There are ways around this, but it isn't automatically handled by this tool.
