@@ -393,7 +393,7 @@ def main():
         git_dir, work_start, work_end, day_end, skip_weekends, args.name, args.email
     )
     _install_hook(git_dir)
-    print(f"\t🤫 post-commit hook installed @{git_dir / 'hooks' / 'post-commit'}")
+    print(f"\n🤫 post-commit hook installed @{git_dir / 'hooks' / 'post-commit'}")
 
 
 if __name__ == "__main__":
