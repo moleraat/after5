@@ -219,14 +219,14 @@ def _read_config(git_dir: Path) -> dict:
 
 def _install_hook(git_dir: Path, repo_path: str) -> None:
     hook_path = git_dir / "hooks" / "post-commit"
-    
+
     result = subprocess.run(
         ["git", "-C", repo_path, "config", "core.hooksPath"],
         capture_output=True, text=True, check=False,
     )
     if result.returncode == 0 and result.stdout.strip():
         print(
-            f"\n\nwarning: core.hooksPath is set to {result.stdout.strip()!r} — "
+            f"\nWARNING: core.hooksPath is set to {result.stdout.strip()!r} — "
             f"git will ignore {hook_path} by default\n"
         )
 
@@ -407,7 +407,7 @@ def main():
         git_dir, work_start, work_end, day_end, skip_weekends, args.name, args.email
     )
     _install_hook(git_dir, args.repo)
-    print("\n🤫 post-commit hook installed in target repo")
+    print("🤫 post-commit hook installed in target repo")
 
 
 if __name__ == "__main__":
