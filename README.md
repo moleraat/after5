@@ -48,4 +48,4 @@ git push --force
 
 Running `after5` in the target repo goes through the commit history day by day. It collects commits in the interval `[work_start, day_end)` and maps them to the interval `(work_end, day_end)`. Anything before `work_start` is ignored. 
 
-After running the backfill with `after5`, a post-commit hook is installed in the target repo or global hooks directory. Going forward, commits are automatically rewritten with the settings you originally ran the backfill with (e.g. work hours, author name, etc).
+After running the backfill with `after5`, a post-commit hook is installed in the target repo. Going forward, commits are automatically rewritten with the settings you originally ran the backfill with (e.g. work hours, author name, etc).
