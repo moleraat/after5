@@ -2,7 +2,7 @@
 
 If you're like me, there's nothing better than stealing company time. Easily rewrite commit history to be after 5pm. 
 
-Optionally install a post-commit hook to rewrite going forward, rewrite the author and email commit info, set different working hours other than 9-5pm, or only rewrite history within a specified date range.
+Also installs a post-commit hook to rewrite your info going forward without having to remember to run `after5`. Remembers your settings for author and email info, different working hours other than 9-5pm, etc.
 
 Builds on top of [git-filter-repo](https://github.com/newren/git-filter-repo#simple-example-with-comparisons)
 
