@@ -240,6 +240,7 @@ def _git_dir(repo_path: str) -> Path:
     )
     gd = result.stdout.strip()
     p = Path(gd)
+
     return p if p.is_absolute() else (Path(repo_path).resolve() / p).resolve()
 
 
