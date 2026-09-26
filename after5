@@ -223,10 +223,8 @@ def _install_hook(git_dir: Path) -> None:
 
     if hook_path.exists():
         existing = hook_path.read_text()
-        if "after5 --amend-head" in existing:
-            return
-
-        hook_path.write_text(existing.rstrip("\n") + "\n" + call_line)
+        lines = [l for l in existing.splitlines(keepends=True) if "after5 --amend-head" not in l]
+        hook_path.write_text("".join(lines).rstrip("\n") + "\n" + call_line)
 
     else:
         hook_path.write_text("#!/usr/bin/env bash\n" + call_line)
