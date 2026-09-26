@@ -217,15 +217,24 @@ def _read_config(git_dir: Path) -> dict:
         return tomllib.load(f)
 
 
-def _install_hook(git_dir: Path) -> None:
-    hook_path = git_dir / "hooks" / "post-commit"
+def _install_hook(git_dir: Path, repo_path: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", repo_path, "config", "core.hooksPath"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 0 and result.stdout.strip():
+        hooks_dir = Path(result.stdout.strip()).expanduser()
+    else:
+        hooks_dir = git_dir / "hooks"
+
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    hook_path = hooks_dir / "post-commit"
     call_line = f"{shutil.which('after5') or 'after5'} --amend-head\n"
 
     if hook_path.exists():
         existing = hook_path.read_text()
         lines = [l for l in existing.splitlines(keepends=True) if "after5 --amend-head" not in l]
         hook_path.write_text("".join(lines).rstrip("\n") + "\n" + call_line)
-
     else:
         hook_path.write_text("#!/usr/bin/env bash\n" + call_line)
         hook_path.chmod(0o755)
@@ -396,8 +405,8 @@ def main():
     _write_config(
         git_dir, work_start, work_end, day_end, skip_weekends, args.name, args.email
     )
-    _install_hook(git_dir)
-    print(f"\n🤫 post-commit hook installed @{git_dir / 'hooks' / 'post-commit'}")
+    _install_hook(git_dir, args.repo)
+    print("\n🤫 post-commit hook installed")
 
 
 if __name__ == "__main__":
