@@ -21,11 +21,12 @@ Examples:
     # Option to independently rewrite name and email info (e.g. you have a different git profile)
     after5 --name sneaky --email beaky@goodemployee.com
 """
+
 import argparse
 import os
 import subprocess
 import sys
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import tomllib
@@ -39,6 +40,11 @@ except ImportError:
 CommitHash = str
 UtcTimestamp = int
 ShiftMap = dict[CommitHash, UtcTimestamp]
+
+
+# ############################################################################ #
+# Time Handling                                                                #
+# ############################################################################ #
 
 
 def _day_secs(dt: datetime) -> int:
@@ -58,23 +64,60 @@ def _parse_utc_offset(offset_str: str) -> int:
     return sign * (int(offset_str[1:3]) * 3600 + int(offset_str[3:5]) * 60)
 
 
-def _git_dir(repo_path: str) -> Path:
-    result = subprocess.run(
-        ["git", "-C", repo_path, "rev-parse", "--git-dir"],
-        capture_output=True, text=True, check=True,
-    )
-    gd = result.stdout.strip()
-    p = Path(gd)
-    return p if p.is_absolute() else (Path(repo_path).resolve() / p).resolve()
+def _replace_timestamp(date: bytes, new_ts: int) -> bytes:
+    # keep tz offset, replace utc seconds
+    _, offset_str = date.decode().split()
+    return f"{new_ts} {offset_str}".encode()
 
 
-def project_timestamp(local_day_secs: int, midnight: int, work_start: int, work_end: int, day_end: int) -> int:
+def project_timestamp(
+    local_day_secs: int, prev_midnight: int, work_start: int, work_end: int, day_end: int
+) -> int:
     target_start = work_end + 1
     scale = (day_end - target_start) / (day_end - work_start)
-    return midnight + target_start + int((local_day_secs - work_start) * scale)
+    rescaled_duration = (local_day_secs - work_start) * scale
+
+    return prev_midnight + target_start + int(rescaled_duration)
 
 
-def collect_commits(repo_path: str, after: str | None = None, before: str | None = None) -> dict[CommitHash, datetime]:
+def build_shift_map(
+    commits: dict[CommitHash, datetime],
+    work_end: int = 17 * 3600,
+    work_start: int = 9 * 3600,
+    day_end: int = 24 * 3600,
+    skip_weekends: bool = True,
+) -> ShiftMap:
+    # only redistribute days with >= 1 commit in work window
+    targeted_days = set()
+    for dt in commits.values():
+        if (work_start <= _day_secs(dt) <= work_end) and not (
+            skip_weekends and dt.weekday() >= 5
+        ):
+            targeted_days.add(dt.date())
+
+    shift_map: ShiftMap = {}
+    for hash, dt in commits.items():
+        if dt.date() not in targeted_days:
+            continue
+
+        ds = _day_secs(dt)
+        if ds < work_start or ds >= day_end:
+            continue
+
+        midnight = int(dt.timestamp()) - ds
+        shift_map[hash] = project_timestamp(ds, midnight, work_start, work_end, day_end)
+
+    return shift_map
+
+
+# ############################################################################ #
+# Commands                                                                     #
+# ############################################################################ #
+
+
+def collect_commits(
+    repo_path: str, after: str | None = None, before: str | None = None
+) -> dict[CommitHash, datetime]:
     cmd = ["git", "-C", repo_path, "log", "--format=%H %ad", "--date=raw"]
     if after:
         cmd.append(f"--since={after}")
@@ -93,34 +136,6 @@ def collect_commits(repo_path: str, after: str | None = None, before: str | None
         commits[commit_hash] = datetime.fromtimestamp(ts, tz=tz)
 
     return commits
-
-
-def build_shift_map(
-    commits: dict[CommitHash, datetime],
-    work_end: int = 17 * 3600,
-    work_start: int = 9 * 3600,
-    day_end: int = 24 * 3600,
-    skip_weekends: bool = True,
-) -> ShiftMap:
-    # only redistribute days with >= 1 commit in work window
-    targeted_days = set()
-    for dt in commits.values():
-        if (work_start <= _day_secs(dt) <= work_end) and not (skip_weekends and dt.weekday() >= 5):
-            targeted_days.add(dt.date())
-
-    shift_map: ShiftMap = {}
-    for hash, dt in commits.items():
-        if dt.date() not in targeted_days:
-            continue
-
-        ds = _day_secs(dt)
-        if ds < work_start or ds >= day_end:
-            continue
-
-        midnight = int(dt.timestamp()) - ds
-        shift_map[hash] = project_timestamp(ds, midnight, work_start, work_end, day_end)
-
-    return shift_map
 
 
 def _print_dry_run(commits: dict[CommitHash, datetime], shift_map: ShiftMap) -> None:
@@ -146,12 +161,6 @@ def _print_dry_run(commits: dict[CommitHash, datetime], shift_map: ShiftMap) -> 
         print(f"  {hash[:8]}  {old} ({tz_label})  →  {new} ({tz_label})")
 
 
-def _replace_timestamp(date: bytes, new_ts: int) -> bytes:
-    # keep tz offset, replace utc seconds
-    _, offset_str = date.decode().split()
-    return f"{new_ts} {offset_str}".encode()
-
-
 def make_callback(shift_map: ShiftMap, name: str | None, email: str | None):
     def commit_callback(commit, metadata):
         commit_hash = commit.original_id.decode()
@@ -168,7 +177,20 @@ def make_callback(shift_map: ShiftMap, name: str | None, email: str | None):
     return commit_callback
 
 
-def _write_config(git_dir: Path, work_start: int, work_end: int, day_end: int, skip_weekends: bool, name: str | None, email: str | None) -> None:
+# ############################################################################ #
+# Hook Stuff                                                                   #
+# ############################################################################ #
+
+
+def _write_config(
+    git_dir: Path,
+    work_start: int,
+    work_end: int,
+    day_end: int,
+    skip_weekends: bool,
+    name: str | None,
+    email: str | None,
+) -> None:
     (git_dir / "after5.toml").write_text(
         f"work_start = {work_start}\n"
         f"work_end = {work_end}\n"
@@ -182,7 +204,9 @@ def _write_config(git_dir: Path, work_start: int, work_end: int, day_end: int, s
 def _read_config(git_dir: Path) -> dict:
     config_path = git_dir / "after5.toml"
     if not config_path.exists():
-        sys.exit(f"after5: no config at {config_path} (° ‸ °)? rerun after5 to try and recreate the config")
+        sys.exit(
+            f"after5: no config at {config_path} (° ‸ °)? rerun after5 to try and recreate the config"
+        )
 
     with open(config_path, "rb") as f:
         return tomllib.load(f)
@@ -204,6 +228,18 @@ def _install_hook(git_dir: Path) -> None:
         hook_path.chmod(0o755)
 
 
+def _git_dir(repo_path: str) -> Path:
+    result = subprocess.run(
+        ["git", "-C", repo_path, "rev-parse", "--git-dir"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    gd = result.stdout.strip()
+    p = Path(gd)
+    return p if p.is_absolute() else (Path(repo_path).resolve() / p).resolve()
+
+
 def amend_head(repo_path: str) -> None:
     git_dir = _git_dir(repo_path)
     lock = git_dir / "AFTER5_AMENDING"
@@ -221,7 +257,9 @@ def amend_head(repo_path: str) -> None:
 
     result = subprocess.run(
         ["git", "-C", repo_path, "log", "-1", "--format=%ad %H", "--date=raw"],
-        capture_output=True, text=True, check=True,
+        capture_output=True,
+        text=True,
+        check=True,
     )
     line = result.stdout.strip()
     if not line:
@@ -246,62 +284,75 @@ def amend_head(repo_path: str) -> None:
     lock.touch()
     try:
         cmd = [
-            "git", "-C", repo_path, "commit", "--amend", "--no-edit",
+            "git",
+            "-C",
+            repo_path,
+            "commit",
+            "--amend",
+            "--no-edit",
             f"--date={new_date}",
         ]
         if name and email:
             cmd.append(f"--author={name} <{email}>")
 
-        subprocess.run(cmd, env={**os.environ, "GIT_COMMITTER_DATE": new_date}, check=True)
+        subprocess.run(
+            cmd, env={**os.environ, "GIT_COMMITTER_DATE": new_date}, check=True
+        )
     finally:
         lock.unlink()
+
+
+# ############################################################################ #
+# Main                                                                         #
+# ############################################################################ #
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument(
-        "repo", nargs="?", default=".",
-        help="path to target git repo (default current directory)"
+        "repo",
+        nargs="?",
+        default=".",
+        help="path to target git repo (default current directory)",
     )
     p.add_argument(
-        "--amend-head", action="store_true",
-        help="project HEAD commit timestamp into after-hours range (used by post-commit hook)"
+        "--amend-head",
+        action="store_true",
+        help="project HEAD commit timestamp into after-hours range (used by post-commit hook)",
     )
     p.add_argument(
-        "--dry-run", action="store_true",
-        help="print commits that would be shifted without rewriting history"
+        "--dry-run",
+        action="store_true",
+        help="print commits that would be shifted without rewriting history",
     )
     p.add_argument(
-        "--work-end", default="17:00",
-        help="defines end of work day — commits in work day get shifted after it (HH:MM, default 17:00)"
+        "--work-end",
+        default="17:00",
+        help="defines end of work day — commits in work day get shifted after it (HH:MM, default 17:00)",
     )
     p.add_argument(
-        "--work-start", default="09:00",
-        help="defines start of work day — commits before this aren't touched (HH:MM, default 09:00)"
+        "--work-start",
+        default="09:00",
+        help="defines start of work day — commits before this aren't touched (HH:MM, default 09:00)",
     )
+    p.add_argument("--name", help="replace author/committer name")
+    p.add_argument("--email", help="replace author/committer email")
     p.add_argument(
-        "--name",
-        help="replace author/committer name"
-    )
-    p.add_argument(
-        "--email",
-        help="replace author/committer email"
-    )
-    p.add_argument(
-        "--after",
-        help="only target commits after this date, exclusive (YYYY-MM-DD)"
+        "--after", help="only target commits after this date, exclusive (YYYY-MM-DD)"
     )
     p.add_argument(
         "--before",
-        help="only target commits before this date, inclusive (YYYY-MM-DD, default: yesterday)"
+        help="only target commits before this date, inclusive (YYYY-MM-DD, default: today)",
     )
     p.add_argument(
-        "--day-end", default="24:00",
-        help="exclusive end of day for timestamp redistribution (HH:MM, default 24:00, same as 00:00 next day)"
+        "--day-end",
+        default="24:00",
+        help="exclusive end of day for timestamp redistribution (HH:MM, default 24:00, same as 00:00 next day)",
     )
     p.add_argument(
-        "--skip-weekends", action="store_true",
-        help="option to rewrite weekend commits (default ignore weekends)"
+        "--include-weekends",
+        action="store_true",
+        help="also rewrite weekend commits (default skip weekends)",
     )
     args = p.parse_args()
 
@@ -310,18 +361,22 @@ def main():
         amend_head(args.repo)
         return
 
+    # backfill path
     work_end = _parse_hhmm(args.work_end)
     work_start = _parse_hhmm(args.work_start)
     day_end = _parse_hhmm(args.day_end)
+    skip_weekends = not args.include_weekends
 
-    before = args.before or (date.today() - timedelta(days=1)).isoformat()
+    before = (
+        args.before or datetime.now(tz=timezone.utc).astimezone().date().isoformat()
+    )
     commits = collect_commits(args.repo, after=args.after, before=before)
     shift_map = build_shift_map(
         commits,
         work_end=work_end,
         work_start=work_start,
         day_end=day_end,
-        skip_weekends=args.skip_weekends,
+        skip_weekends=skip_weekends,
     )
 
     if args.dry_run:
@@ -329,20 +384,16 @@ def main():
         return
 
     fr_args = fr.FilteringOptions.parse_args(["--force", "--repo", args.repo])
-    fr.RepoFilter(fr_args, commit_callback=make_callback(shift_map, args.name, args.email)).run()
+    fr.RepoFilter(
+        fr_args, commit_callback=make_callback(shift_map, args.name, args.email)
+    ).run()
 
     git_dir = _git_dir(args.repo)
     _write_config(
-        git_dir,
-        work_start,
-        work_end,
-        day_end,
-        args.skip_weekends,
-        args.name,
-        args.email
+        git_dir, work_start, work_end, day_end, skip_weekends, args.name, args.email
     )
     _install_hook(git_dir)
-    print(f"after5: hook installed at {git_dir / 'hooks' / 'post-commit'}")
+    print(f"\t🤫 post-commit hook installed @{git_dir / 'hooks' / 'post-commit'}")
 
 
 if __name__ == "__main__":
