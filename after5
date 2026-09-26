@@ -24,6 +24,7 @@ Examples:
 
 import argparse
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
@@ -71,7 +72,11 @@ def _replace_timestamp(date: bytes, new_ts: int) -> bytes:
 
 
 def project_timestamp(
-    local_day_secs: int, prev_midnight: int, work_start: int, work_end: int, day_end: int
+    local_day_secs: int,
+    prev_midnight: int,
+    work_start: int,
+    work_end: int,
+    day_end: int,
 ) -> int:
     target_start = work_end + 1
     scale = (day_end - target_start) / (day_end - work_start)
@@ -214,7 +219,7 @@ def _read_config(git_dir: Path) -> dict:
 
 def _install_hook(git_dir: Path) -> None:
     hook_path = git_dir / "hooks" / "post-commit"
-    call_line = "after5 --amend-head\n"
+    call_line = f"{shutil.which('after5') or 'after5'} --amend-head\n"
 
     if hook_path.exists():
         existing = hook_path.read_text()
